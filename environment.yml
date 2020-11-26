@@ -1,0 +1,24 @@
+name: sbemoored
+channels:
+  - conda-forge
+dependencies:
+  - python=3.8
+  - black
+  - ipykernel
+  - ipython
+  - jupyter
+  - matplotlib
+  - numpy
+  - pandas
+  - pytest
+  - scipy
+  - xarray
+  - pip
+  - netcdf4
+  - pip:
+    - jupytext
+    - seabird
+    - watchmagic
+    # - "-e /Users/gunnar/Projects/python/gvpy"
+    - "-e git+https://github.com/gunnarvoet/gvpy#egg=gvpy"
+    - "-e ."
