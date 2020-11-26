@@ -150,44 +150,27 @@ def read_sbe_cnv(file, lat=0, lon=0):
 
 def parse_cnv_no_time(cnv):
     # generate time vector
-    hdr = cnv.raw_header()
-    entries = dict(
-        nvalues="# nvalues",
-        start_time_str="# start_time",
-        interval="# interval = ",
-        cnd_units="conductivity",
-    )
-    for hi in hdr["descriptors"].split("\n"):
-        for k, v in entries.items():
-            if v in hi:
-                xi = hi.find(" = ")
-                entries[k] = hi[xi + 3 :]
-
-    xi = entries["interval"].find(":")
-    entries["interval"] = int(entries["interval"][xi + 2 :])
-    entries["nvalues"] = int(entries["nvalues"])
-    xi = entries["cnd_units"].find("[")
-    entries["cnd_units"] = entries["cnd_units"][xi + 1 : xi + 4]
-
-    start_time_np64 = pd.to_datetime(entries['start_time_str']).to_datetime64()
-
+    entries = parse_header(cnv)
     tr = pd.period_range(
-        start=start_time_np64,
+        start=entries["start_time"],
         freq="{}s".format(entries["interval"]),
         periods=entries["nvalues"],
     )
-
     mctime = tr.to_timestamp().to_numpy()
     # data vars
     dvars = {"pr": "p", "t090": "t"}
     mcdata = {}
     for k, di in dvars.items():
         if k in cnv.keys():
-            # print(di, ':', k)
             mcdata[di] = (["time"], cnv[k])
     mc = xr.Dataset(data_vars=mcdata, coords={"time": mctime})
     mc.attrs["file"] = cnv.attributes["filename"]
     mc.attrs["sbe_model"] = cnv.attributes["sbe_model"]
+    mc.attrs["nvalues"] = entries["nvalues"]
+    mc.attrs["start time str"] = entries["start_time_str"]
+    mc.attrs["start time"] = entries["start_time"]
+    mc.attrs["sampling interval"] = entries["interval"]
+
     # conductivity
     cvars = {"CNDC": "c"}
     cfac = 10 if entries["cnd_units"] == "S/m" else 1
@@ -200,6 +183,7 @@ def parse_cnv_no_time(cnv):
 
 
 def parse_cnv_with_time(cnv):
+    entries = parse_header(cnv)
     # parse time
     if "timeJV2" in cnv.keys():
         mcyday = cnv["timeJV2"]
@@ -224,6 +208,11 @@ def parse_cnv_with_time(cnv):
     mc = xr.Dataset(data_vars=mcdata, coords={"time": mctime})
     mc.attrs["file"] = cnv.attributes["filename"]
     mc.attrs["sbe_model"] = cnv.attributes["sbe_model"]
+    mc.attrs["nvalues"] = entries["nvalues"]
+    mc.attrs["start time str"] = entries["start_time_str"]
+    mc.attrs["start time"] = entries["start_time"]
+    mc.attrs["sampling interval"] = entries["interval"]
+
     # conductivity
     cvars = {"cond0mS/cm": "c", "cond0S/m": "c"}
     for k, di in cvars.items():
@@ -235,6 +224,36 @@ def parse_cnv_with_time(cnv):
                 conductivity = cnv[k]
             mc[di] = (["time"], conductivity)
     return mc
+
+
+def parse_header(cnv):
+    hdr = cnv.raw_header()
+    entries = dict(
+        nvalues="# nvalues",
+        start_time_str="# start_time",
+        interval="# interval = ",
+        cnd_units="conductivity",
+    )
+    out = entries.copy()
+    for hi in hdr["descriptors"].split("\n"):
+        for k, v in entries.items():
+            if v in hi:
+                xi = hi.find(" = ")
+                entries[k] = hi[xi + 3 :]
+
+    xi = entries["interval"].find(":")
+    entries["interval"] = int(entries["interval"][xi + 2 :])
+    entries["nvalues"] = int(entries["nvalues"])
+    xi = entries["cnd_units"].find("[")
+    entries["cnd_units"] = entries["cnd_units"][xi + 1 : xi + 4]
+    if "[" in entries["start_time_str"]:
+        entries["start_time_str"] = (
+            entries["start_time_str"].split("[")[0].strip()
+        )
+    entries["start_time"] = pd.to_datetime(
+        entries["start_time_str"]
+    ).to_datetime64()
+    return entries
 
 
 def time_offset(tds, insttime, utctime):
