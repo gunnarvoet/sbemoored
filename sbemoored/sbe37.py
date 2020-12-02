@@ -67,18 +67,18 @@ def proc(
                     savepath
                 )
             )
-            tds = xr.open_dataarray(savepath)
+            tds = xr.open_dataset(savepath)
             # Update time file stamp. This way, make still recognizes that
             # the file has been worked on.
             savepath.touch()
             savenc = False
         else:
             print("reading csv file")
-            tds = read_csv(file)
+            tds = read_sbe_cnv(file)
             savenc = True
     else:
         print("reading csv file")
-        tds = read_csv(file)
+        tds = read_sbe_cnv(file)
         savenc = False
     # cut short (if necessary) apply time drift
     tds = time_offset(
@@ -89,7 +89,7 @@ def proc(
         save_nc(tds, data_out)
     # plot
     if show_plot:
-        plot(tds, figure_out, cal_time)
+        plot(tds, figure_out)
 
     return tds
 
@@ -175,11 +175,11 @@ def parse_cnv_no_time(cnv):
         if k in cnv.keys():
             mcdata[di] = (["time"], cnv[k])
     mc = xr.Dataset(data_vars=mcdata, coords={"time": mctime})
+    mc.attrs["SN"] = entries["SN"]
     mc.attrs["file"] = cnv.attributes["filename"]
     mc.attrs["sbe_model"] = cnv.attributes["sbe_model"]
     mc.attrs["nvalues"] = entries["nvalues"]
     mc.attrs["start time str"] = entries["start_time_str"]
-    mc.attrs["start time"] = entries["start_time"]
     mc.attrs["sampling interval"] = entries["interval"]
 
     # conductivity
@@ -217,11 +217,11 @@ def parse_cnv_with_time(cnv):
             # print(di, ':', k)
             mcdata[di] = (["time"], cnv[k])
     mc = xr.Dataset(data_vars=mcdata, coords={"time": mctime})
+    mc.attrs["SN"] = entries["SN"]
     mc.attrs["file"] = cnv.attributes["filename"]
     mc.attrs["sbe_model"] = cnv.attributes["sbe_model"]
     mc.attrs["nvalues"] = entries["nvalues"]
     mc.attrs["start time str"] = entries["start_time_str"]
-    mc.attrs["start time"] = entries["start_time"]
     mc.attrs["sampling interval"] = entries["interval"]
 
     # conductivity
@@ -245,7 +245,6 @@ def parse_header(cnv):
         interval="# interval = ",
         cnd_units="conductivity",
     )
-    out = entries.copy()
     for hi in hdr["descriptors"].split("\n"):
         for k, v in entries.items():
             if v in hi:
@@ -264,6 +263,21 @@ def parse_header(cnv):
     entries["start_time"] = pd.to_datetime(
         entries["start_time_str"]
     ).to_datetime64()
+
+    # serial number
+    entries2 = dict(
+        temp_sn="* Temperature SN = ", cond_sn="* Conductivity SN = ",
+    )
+    sns = dict(temp_sn="", cond_sn="",)
+    for hi in hdr["intro"].split("\n"):
+        for k, v in entries2.items():
+            if v in hi:
+                xi = hi.find(" = ")
+                sns[k] = hi[xi + 3 :]
+
+    if sns["temp_sn"] == sns["cond_sn"]:
+        entries["SN"] = sns["temp_sn"]
+
     return entries
 
 
@@ -342,122 +356,63 @@ def save_nc(tds, data_out):
     tds.to_netcdf(savepath)
 
 
-def plot(solo, figure_out=None, cal_time=None):
-
-    # check if cal_time is past end of time series
-    if cal_time is not None:
-        if solo.time[-1] < cal_time:
-            show_cal = False
-            print("clock cal time is past end of time series, not plotting")
-        else:
-            show_cal = True
-    else:
-        show_cal = False
-
+def plot(tds, figure_out=None):
     # set up figure
-    if show_cal:
-        fig, [ax0, ax1] = plt.subplots(
-            nrows=2, ncols=1, figsize=(10, 7), constrained_layout=True
-        )
-    else:
-        fig, ax0 = plt.subplots(
-            nrows=1, ncols=1, figsize=(10, 4), constrained_layout=True
-        )
+    fig, ax = plt.subplots(
+        nrows=3, ncols=1, figsize=(10, 9), sharex=True, constrained_layout=True
+    )
 
-    # plot time series. coarsen if it is too long to slow things down
-    if len(solo) > 1e5:
-        coarsen_by = int(np.floor(60 / solo.attrs["sampling period"]))
-        solo.coarsen(time=coarsen_by, boundary="trim").mean().plot(ax=ax0)
-    else:
-        solo.plot(ax=ax0)
+    tds.p.plot(ax=ax[0])
     # plot a warning if time offset not applied
-    if solo.attrs["time offset applied"] == 1:
-        ax0.text(
+    if tds.attrs["time offset applied"] == 1:
+        ax[0].text(
             0.05,
             0.9,
-            "time offset of {} seconds applied".format(
-                solo.attrs["time drift in ms"] / 1000
+            "time offset of {:1.3f} seconds applied".format(
+                tds.attrs["time drift in ms"] / 1000
             ),
-            transform=ax0.transAxes,
+            transform=ax[0].transAxes,
             backgroundcolor="w",
         )
     else:
-        if solo.attrs["time drift in ms"] == 0:
-            ax0.text(
+        if tds.attrs["time drift in ms"] == 0:
+            ax[0].text(
                 0.05,
                 0.9,
                 "WARNING: time offset unknown",
-                transform=ax0.transAxes,
+                transform=ax[0].transAxes,
                 color="red",
                 backgroundcolor="w",
             )
-        elif np.absolute(solo.attrs["time drift in ms"]) > 3.6e6:
-            ax0.text(
+        elif np.absolute(tds.attrs["time drift in ms"]) > 3.6e6:
+            ax[0].text(
                 0.05,
                 0.9,
                 "WARNING: time offset more than one hour, not applied",
-                transform=ax0.transAxes,
+                transform=ax[0].transAxes,
                 color="red",
                 backgroundcolor="w",
             )
         else:
-            ax0.text(
+            ax[0].text(
                 0.05,
                 0.9,
                 "time offset not yet applied",
-                transform=ax0.transAxes,
+                transform=ax[0].transAxes,
                 backgroundcolor="w",
             )
+    tds.t.plot(ax=ax[1])
+    tds.c.plot(ax=ax[2])
 
-    ax0.grid()
-    ax0.set(title="SBE56 SN {}".format(solo.attrs["SN"]))
-    ax0.set(xlabel="")
-    gv.plot.concise_date(ax0)
-
-    # plot calibration
-    if show_cal:
-        tmp = solo.sel(
-            time=slice(
-                cal_time - np.timedelta64(60, "s"),
-                cal_time + np.timedelta64(60, "s"),
-            )
-        )
-        if len(tmp) > 0:
-            tmp.plot(ax=ax1, marker=".")
-            ylims = np.array(
-                [np.floor(tmp.min().data), np.ceil(tmp.max().data)]
-            )
-        else:
-            ylims = np.array([1, 9])
-        ax1.plot(
-            np.tile(cal_time, 2),
-            ylims + np.array([1, -1]),
-            linestyle="-",
-            color="darkorchid",
-            linewidth=1.5,
-        )
-        ax1.annotate(
-            "time calibration",
-            (cal_time, ylims[0] + 0.5),
-            xytext=(8, 8),
-            textcoords="offset points",
-            color="darkorchid",
-            ha="left",
-            backgroundcolor="w",
-        )
-        ax1.set(
-            xlim=[
-                cal_time - np.timedelta64(60, "s"),
-                cal_time + np.timedelta64(60, "s"),
-            ],
-            ylim=ylims,
-            xlabel="",
-        )
-        ax1.grid()
-        gv.plot.concise_date(ax1)
+    for axi in ax:
+        axi.grid()
+        axi.set(title="SBE37 SN {}".format(tds.attrs["SN"]))
+        axi.set(xlabel="")
+        gv.plot.concise_date(axi)
+    ax[0].invert_yaxis()
 
     if figure_out is not None or False:
-        figurename = "{:s}.png".format(solo.attrs["file"][:-4])
+        figurename = "{:s}.png".format(tds.attrs["file"][:-4])
         plt.savefig(figure_out.joinpath(figurename), facecolor="w", dpi=300)
 
 
