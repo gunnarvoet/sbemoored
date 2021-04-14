@@ -19,8 +19,8 @@ import gvpy as gv
 
 def proc(
     file,
-    time_instrument,
-    time_utc,
+    time_instrument=None,
+    time_utc=None,
     data_out=None,
     figure_out=None,
     cal_time=None,
@@ -34,9 +34,9 @@ def proc(
     ----------
     file : str or pathlib.Path
         Path to csv data file
-    time_instrument : str or np.datetime64
+    time_instrument : str or np.datetime64, optional
         Instrument time at data download
-    time_utc : str or np.datetime64
+    time_utc : str or np.datetime64, optional
         UTC time at data download
     data_out : path object, optional
         Path to data output directory
@@ -205,9 +205,12 @@ def parse_cnv_with_time(cnv):
     base_year = pd.to_datetime(start_time_str).year
     mctime = yday1_to_datetime64(base_year, mcyday)
     # let's make sure the first time stamp we generated matches the string in the cnv file
-    assert pd.to_datetime(np.datetime64(mctime[0], "s")) == pd.to_datetime(
-        start_time_str
-    )
+    try:
+        assert pd.to_datetime(np.datetime64(mctime[0], "s")) == pd.to_datetime(
+            start_time_str
+        )
+    except AssertionError as error:
+        print(error)
 
     # data vars
     dvars = {"prdM": "p", "tv290C": "t"}
@@ -266,9 +269,13 @@ def parse_header(cnv):
 
     # serial number
     entries2 = dict(
-        temp_sn="* Temperature SN = ", cond_sn="* Conductivity SN = ",
+        temp_sn="* Temperature SN = ",
+        cond_sn="* Conductivity SN = ",
     )
-    sns = dict(temp_sn="", cond_sn="",)
+    sns = dict(
+        temp_sn="",
+        cond_sn="",
+    )
     for hi in hdr["intro"].split("\n"):
         for k, v in entries2.items():
             if v in hi:
@@ -289,10 +296,10 @@ def time_offset(tds, insttime, utctime, cuttime=None):
     ----------
     tds : xarray.DataArray
         SBE37 data structure
-        
+
     insttime : np.datetime64
         Instrument time at end of time series
-        
+
     utctime : np.datetime64
         UTC time at end of time series
 
@@ -308,6 +315,10 @@ def time_offset(tds, insttime, utctime, cuttime=None):
 
     if tds.attrs["time offset applied"]:
         print("time offset has already been applied")
+    elif insttime is None or utctime is None:
+        print("no time readings provided; not applying any offset")
+        tds.attrs["time offset applied"] = 0
+        tds.attrs["time offset provided"] = 0
     else:
         # cut time series short if necessary
         if cuttime is not None:
@@ -344,6 +355,7 @@ def time_offset(tds, insttime, utctime, cuttime=None):
         new_time = old_time - time_offset
         tds["time"] = new_time
         tds.attrs["time offset applied"] = 1
+        tds.attrs["time offset provided"] = 0
 
     return tds
 
@@ -364,43 +376,44 @@ def plot(tds, figure_out=None):
 
     tds.p.plot(ax=ax[0])
     # plot a warning if time offset not applied
-    if tds.attrs["time offset applied"] == 1:
-        ax[0].text(
-            0.05,
-            0.9,
-            "time offset of {:1.3f} seconds applied".format(
-                tds.attrs["time drift in ms"] / 1000
-            ),
-            transform=ax[0].transAxes,
-            backgroundcolor="w",
-        )
-    else:
-        if tds.attrs["time drift in ms"] == 0:
+    if tds.attrs["time offset provided"]:
+        if tds.attrs["time offset applied"] == 1:
             ax[0].text(
                 0.05,
                 0.9,
-                "WARNING: time offset unknown",
+                "time offset of {:1.3f} seconds applied".format(
+                    tds.attrs["time drift in ms"] / 1000
+                ),
                 transform=ax[0].transAxes,
-                color="red",
-                backgroundcolor="w",
-            )
-        elif np.absolute(tds.attrs["time drift in ms"]) > 3.6e6:
-            ax[0].text(
-                0.05,
-                0.9,
-                "WARNING: time offset more than one hour, not applied",
-                transform=ax[0].transAxes,
-                color="red",
                 backgroundcolor="w",
             )
         else:
-            ax[0].text(
-                0.05,
-                0.9,
-                "time offset not yet applied",
-                transform=ax[0].transAxes,
-                backgroundcolor="w",
-            )
+            if tds.attrs["time drift in ms"] == 0:
+                ax[0].text(
+                    0.05,
+                    0.9,
+                    "WARNING: time offset unknown",
+                    transform=ax[0].transAxes,
+                    color="red",
+                    backgroundcolor="w",
+                )
+            elif np.absolute(tds.attrs["time drift in ms"]) > 3.6e6:
+                ax[0].text(
+                    0.05,
+                    0.9,
+                    "WARNING: time offset more than one hour, not applied",
+                    transform=ax[0].transAxes,
+                    color="red",
+                    backgroundcolor="w",
+                )
+            else:
+                ax[0].text(
+                    0.05,
+                    0.9,
+                    "time offset not yet applied",
+                    transform=ax[0].transAxes,
+                    backgroundcolor="w",
+                )
     tds.t.plot(ax=ax[1])
     tds.c.plot(ax=ax[2])
 
