@@ -19,6 +19,7 @@ dependencies:
     - jupytext
     - seabird
     - watchmagic
+    - xmltodict
     # - "-e /Users/gunnar/Projects/python/gvpy"
     - "-e git+https://github.com/gunnarvoet/gvpy#egg=gvpy"
     - "-e ."

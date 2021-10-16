@@ -20,7 +20,7 @@ setup(
     long_description_content_type="text/x-rst",
     # Requirements
     python_requires=">=3.6",
-    install_requires=["numpy", "gsw", "scipy"],
+    install_requires=["numpy", "gsw", "scipy", "xmltodict", "pandas", "xarray", "gsw", "seabird"],
     extras_require={
         "test": ["pytest"],  # install these with: pip install mixsea[test]
     },
