@@ -13,6 +13,7 @@ import xarray as xr
 import pandas as pd
 import seabird
 import gsw
+import xmltodict
 
 import gvpy as gv
 
@@ -22,10 +23,15 @@ def proc(
     time_instrument=None,
     time_utc=None,
     data_out=None,
+    file_name=None,
     figure_out=None,
     cal_time=None,
     show_plot=True,
-    cut_time=None,
+    cut_end=None,
+    cut_beg=None,
+    lat=None,
+    lon=None,
+    meta=None,
 ):
     """
     Combining SBE56 processing steps.
@@ -40,15 +46,25 @@ def proc(
         UTC time at data download
     data_out : path object, optional
         Path to data output directory
+    file_name : str, optional
+        File name. Defaults to base name of raw file.
     figure_out : path object, optional
         Path to figure output directory
     cal_time : np.datetime64 object, optional
         Time of post-deployment clock calibration
     show_plot : bool, optional
         Generate data plot. Default True.
-    cut_time : np.datetime64, optional
+    cut_end : np.datetime64, optional
         Cut time series short at this time. Time offset will be linearly scaled
         before it is applied.
+    cut_beg : np.datetime64, optional
+        Cut time series at beginning.
+    lat : float, optional
+        Latitude.
+    lon : float, optional
+        Longitude.
+    meta : dict, optional
+        Meta data.
 
     Returns
     -------
@@ -61,7 +77,7 @@ def proc(
     filename = "{:s}.nc".format(file.stem)
     if data_out:
         savepath = data_out.joinpath(filename)
-        if savepath.exists():
+        if savepath.exists() and cut_end is None:
             print(
                 "already processed\nreading netcdf file from\n{}".format(
                     savepath
@@ -74,22 +90,47 @@ def proc(
             savenc = False
         else:
             print("reading csv file")
-            tds = read_sbe_cnv(file)
+            tds = read_sbe_cnv(file, lat=lat, lon=lon)
             savenc = True
     else:
         print("reading csv file")
-        tds = read_sbe_cnv(file)
+        tds = read_sbe_cnv(file, lat=lat, lon=lon)
         savenc = False
     # cut short (if necessary) apply time drift
     tds = time_offset(
-        tds, insttime=time_instrument, utctime=time_utc, cuttime=cut_time
+        tds, insttime=time_instrument, utctime=time_utc, cuttime=cut_end
     )
+    # cut at beginning
+    if cut_beg is not None:
+        mask = tds.time > cut_beg
+        tds = tds.where(mask, drop=True)
+
+    # read xmlcon and set attributes
+    cfgp = read_xml_config(file)
+    vars = dict(t='TemperatureSensor1', c='ConductivitySensor1', p='PressureSensor')
+    for k, v in vars.items():
+        tds[k].attrs["SN"] = cfgp[v].cal["SerialNumber"]
+        tds[k].attrs["CalDate"] = cfgp[v].cal["CalibrationDate"]
+
+    # add more attributes
+    if type(meta) is dict:
+        for k, v in meta.items():
+            tds.attrs[k] = v
+    if lon is not None:
+        tds.attrs['lon'] = lon
+    if lat is not None:
+        tds.attrs['lat'] = lat
+
     # save to netcdf
     if savenc:
-        save_nc(tds, data_out)
+        save_nc(tds, data_out, file_name)
     # plot
     if show_plot:
-        plot(tds, figure_out)
+        if file_name is not None:
+            figure_name = f'{file_name[:file_name.find(".nc")]}.png'
+        else:
+            figure_name = None
+        plot(tds, figure_out, figure_name)
 
     return tds
 
@@ -203,7 +244,9 @@ def parse_cnv_with_time(cnv):
     start_time_str_all = cnv.attributes["start_time"]
     start_time_str = start_time_str_all.split("[")[0]
     base_year = pd.to_datetime(start_time_str).year
-    mctime = yday1_to_datetime64(base_year, mcyday)
+    mctime_ns = yday1_to_datetime64(base_year, mcyday)
+    # convert to milliseconds, otherwise netcdf may run into trouble
+    mctime = gv.time.convert_units(mctime_ns, unit='ms')
     # let's make sure the first time stamp we generated matches the string in the cnv file
     try:
         assert pd.to_datetime(np.datetime64(mctime[0], "s")) == pd.to_datetime(
@@ -318,7 +361,7 @@ def time_offset(tds, insttime, utctime, cuttime=None):
     elif insttime is None or utctime is None:
         print("no time readings provided; not applying any offset")
         tds.attrs["time offset applied"] = 0
-        tds.attrs["time offset provided"] = 0
+        tds.attrs["time drift in ms"] = 'N/A'
     else:
         # cut time series short if necessary
         if cuttime is not None:
@@ -329,6 +372,7 @@ def time_offset(tds, insttime, utctime, cuttime=None):
             print("scaling time offset by {:1.3f}".format(scale_factor))
             tds = tds.where(tds.time < cuttime, drop=True)
             tds.attrs["nvalues"] = len(tds.time)
+        # we also need to scale the time offset if the time series stops early
         else:
             scale_factor = 1
         # calculate time offset
@@ -355,20 +399,21 @@ def time_offset(tds, insttime, utctime, cuttime=None):
         new_time = old_time - time_offset
         tds["time"] = new_time
         tds.attrs["time offset applied"] = 1
-        tds.attrs["time offset provided"] = 0
 
     return tds
 
 
-def save_nc(tds, data_out):
+def save_nc(tds, data_out, filename=None):
+    tds['time'] = gv.time.convert_units(tds.time, unit='ms')
     # save dataset
-    filename = "{:s}.nc".format(tds.attrs["file"][:-4])
+    if filename is None:
+        filename = "{:s}.nc".format(tds.attrs["file"][:-4])
     savepath = data_out.joinpath(filename)
     print("Saving to {}".format(savepath))
     tds.to_netcdf(savepath)
 
 
-def plot(tds, figure_out=None):
+def plot(tds, figure_out=None, figure_name=None):
     # set up figure
     fig, ax = plt.subplots(
         nrows=3, ncols=1, figsize=(10, 9), sharex=True, constrained_layout=True
@@ -376,44 +421,52 @@ def plot(tds, figure_out=None):
 
     tds.p.plot(ax=ax[0])
     # plot a warning if time offset not applied
-    if tds.attrs["time offset provided"]:
-        if tds.attrs["time offset applied"] == 1:
+    if tds.attrs["time drift in ms"] == 'N/A':
+        ax[0].text(
+            0.05,
+            1.05,
+            "WARNING: no time offset provided",
+            transform=ax[0].transAxes,
+            color="red",
+            backgroundcolor="w",
+        )
+    elif tds.attrs["time offset applied"] == 1:
+        ax[0].text(
+            0.05,
+            1.05,
+            "time offset of {:1.3f} seconds applied".format(
+                tds.attrs["time drift in ms"] / 1000
+            ),
+            transform=ax[0].transAxes,
+            backgroundcolor="w",
+        )
+    else:
+        if tds.attrs["time drift in ms"] == 0:
             ax[0].text(
                 0.05,
-                0.9,
-                "time offset of {:1.3f} seconds applied".format(
-                    tds.attrs["time drift in ms"] / 1000
-                ),
+                1.05,
+                "WARNING: time offset zero",
                 transform=ax[0].transAxes,
+                color="red",
+                backgroundcolor="w",
+            )
+        elif np.absolute(tds.attrs["time drift in ms"]) > 3.6e6:
+            ax[0].text(
+                0.05,
+                1.05,
+                "WARNING: time offset more than one hour, not applied",
+                transform=ax[0].transAxes,
+                color="red",
                 backgroundcolor="w",
             )
         else:
-            if tds.attrs["time drift in ms"] == 0:
-                ax[0].text(
-                    0.05,
-                    0.9,
-                    "WARNING: time offset unknown",
-                    transform=ax[0].transAxes,
-                    color="red",
-                    backgroundcolor="w",
-                )
-            elif np.absolute(tds.attrs["time drift in ms"]) > 3.6e6:
-                ax[0].text(
-                    0.05,
-                    0.9,
-                    "WARNING: time offset more than one hour, not applied",
-                    transform=ax[0].transAxes,
-                    color="red",
-                    backgroundcolor="w",
-                )
-            else:
-                ax[0].text(
-                    0.05,
-                    0.9,
-                    "time offset not yet applied",
-                    transform=ax[0].transAxes,
-                    backgroundcolor="w",
-                )
+            ax[0].text(
+                0.05,
+                1.05,
+                "time offset not yet applied",
+                transform=ax[0].transAxes,
+                backgroundcolor="w",
+            )
     tds.t.plot(ax=ax[1])
     tds.c.plot(ax=ax[2])
 
@@ -425,8 +478,9 @@ def plot(tds, figure_out=None):
     ax[0].invert_yaxis()
 
     if figure_out is not None or False:
-        figurename = "{:s}.png".format(tds.attrs["file"][:-4])
-        plt.savefig(figure_out.joinpath(figurename), facecolor="w", dpi=300)
+        if figure_name is None:
+            figure_name = "{:s}.png".format(tds.attrs["file"][:-4])
+        plt.savefig(figure_out.joinpath(figure_name), facecolor="w", dpi=300)
 
 
 def yday1_to_datetime64(baseyear, yday):
@@ -450,3 +504,122 @@ def yday1_to_datetime64(baseyear, yday):
     # convert to numpy datetime64
     time64 = np.array([np.datetime64(ti, "ms") for ti in time])
     return time64
+
+
+def clock_check(tds, plot=True, timedelta=200):
+    """Check clock interval on SBE 37.
+
+    Parameters
+    ----------
+    tds : xr.Dataset
+        SBE 37 dataset with time variable.
+    plot : bool, optional
+        Plot time delta around time where clock changes. Default True.
+    timedelta : int, optional
+        Time deviation from median in ms. Default 200.
+
+    Returns
+    -------
+    cutoff : np.datetime64
+        First time stamp where clock is off. Returns None when the clock is fine.
+    """
+
+    dt = tds.time.diff(dim="time")
+    dtm = dt.median(dim="time")
+    cutoff = dt.where(
+        np.absolute(dt - dtm) > np.timedelta64(timedelta, "ms"), drop=True
+    ).time
+    if cutoff.size > 0:
+        cutoff = cutoff.data[0]
+    else:
+        cutoff = None
+    print(cutoff)
+    if plot and cutoff is not None:
+        fig, ax = gv.plot.quickfig()
+        t1 = cutoff - np.timedelta64(4, "h")
+        t2 = cutoff + np.timedelta64(4, "h")
+        tp = dt.sel(time=slice(t1, t2))
+        tp.plot(ax=ax)
+    return cutoff
+
+
+def _find_xmlconfig(file):
+    """Generate path to xml config file for current hex file.
+    Config file needs to be in the same directory as the hex file."""
+    name = file.stem
+    # try upper case filename
+    xmlfile = name.upper() + ".XMLCON"
+    p = file.parent
+    xmlfile = p.joinpath(xmlfile)
+    # use os.listdir to find the actual case of the filename if the upper
+    # case did not work.
+    if xmlfile.name not in os.listdir(os.path.dirname(xmlfile)):
+        xmlfile = name.lower() + ".XMLCON"
+        xmlfile = p.joinpath(xmlfile)
+    return xmlfile
+
+
+def read_xml_config(file):
+    """Read xml config file."""
+    xmlfile = _find_xmlconfig(file)
+    try:
+        with open(xmlfile) as fd:
+            tmp = xmltodict.parse(fd.read())
+    except OSError as e:
+        raise FileNotFoundError(
+            errno.ENOENT, os.strerror(errno.ENOENT), e.filename
+        )
+    tmp = tmp["SBE_InstrumentConfiguration"]
+    tmp = tmp["Instrument"]
+    sa = tmp["SensorArray"]["Sensor"]
+    # parse only valide sensors
+    cfg = {}
+    ti = 0
+    ci = 0
+    for si in sa:
+        keys = si.keys()
+        for k in keys:
+            if "@" not in k and k != "NotInUse":
+                if k == "TemperatureSensor":
+                    ti += 1
+                    kstr = "{}{}".format(k, ti)
+                elif k == "ConductivitySensor":
+                    ci += 1
+                    kstr = "{}{}".format(k, ci)
+                else:
+                    kstr = k
+                cfg[kstr] = si
+                # cfg[kstr]["cal"] = munchify(cfg[kstr][k])
+                cfg[kstr]["cal"] = cfg[kstr][k]
+                del cfg[kstr][k]
+    cfgp = pd.DataFrame(cfg)
+    cfgp = _xml_coeffs_to_float(cfgp)
+    return cfgp
+
+
+def _xml_coeffs_to_float(cfgp):
+    # Convert calibration coefficients to floats.
+    keep_strings = [
+        "@SensorID",
+        "SerialNumber",
+        "CalibrationDate",
+        "UseG_J",
+    ]
+    for k in cfgp.keys():
+        for ki in cfgp[k]["cal"].keys():
+            if isinstance(cfgp[k]["cal"][ki], str):
+                if ki not in keep_strings:
+                    cfgp[k]["cal"][ki] = float(cfgp[k]["cal"][ki])
+            elif isinstance(cfgp[k]["cal"][ki], list):
+                for i, li in enumerate(cfgp[k]["cal"][ki]):
+                    for kli in li.keys():
+                        cfgp[k]["cal"][ki][i][kli] = float(
+                            cfgp[k]["cal"][ki][i][kli]
+                        )
+        # We can't have None values in the xarray.Dataset later on
+        # or otherwise it won't properly write to netcdf. Therefore,
+        # convert any None items to 'N/A'
+        for ki, v in cfgp[k]["cal"].items():
+            if v is None:
+                cfgp[k].cal[ki] = "N/A"
+    return cfgp
