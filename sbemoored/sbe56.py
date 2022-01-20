@@ -378,7 +378,7 @@ def plot(solo, figure_out=None, cal_time=None):
 
     if figure_out is not None or False:
         figurename = "{:s}.png".format(solo.attrs["file"][:-4])
-        plt.savefig(figure_out.joinpath(figurename), dpi=300)
+        plt.savefig(figure_out.joinpath(figurename), dpi=300, facecolor="w")
 
 
 def plot_old(solo, figure_out=None, cal_time=None):
