@@ -404,7 +404,7 @@ def time_offset(tds, insttime, utctime, cuttime=None):
 
 
 def save_nc(tds, data_out, filename=None):
-    tds['time'] = gv.time.convert_units(tds.time, unit='ms')
+    # tds['time'] = gv.time.convert_units(tds.time, unit='ms')
     # save dataset
     if filename is None:
         filename = "{:s}.nc".format(tds.attrs["file"][:-4])
