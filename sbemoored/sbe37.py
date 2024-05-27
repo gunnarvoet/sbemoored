@@ -77,7 +77,7 @@ def proc(
     filename = "{:s}.nc".format(file.stem)
     if data_out:
         savepath = data_out.joinpath(filename)
-        if savepath.exists() and cut_end is None:
+        if savepath.exists() and cut_end is None and cut_beg is None:
             print(
                 "already processed\nreading netcdf file from\n{}".format(
                     savepath
@@ -167,16 +167,16 @@ def read_sbe_cnv(file, lat=0, lon=0):
         mc = parse_cnv_no_time(cnv)
 
     # Calculate oceanographic variables
-    mc["SP"] = (["time"], gsw.SP_from_C(mc.c, mc.t, mc.p))
+    mc["SP"] = (["time"], gsw.SP_from_C(mc.c, mc.t, mc.p).data)
     if lat == 0 and lon == 0:
         print(
             "warning: absolute salinity, conservative temperature\n",
             "and density calculation may be inaccurate\n",
             "due to missing latitude/longitude",
         )
-    mc["SA"] = (["time"], gsw.SA_from_SP(mc.SP, mc.p, lat=lat, lon=lon))
-    mc["CT"] = (["time"], gsw.CT_from_t(mc.SA, mc.t, mc.p))
-    mc["sg0"] = (["time"], gsw.sigma0(mc.SA, mc.CT))
+    mc["SA"] = (["time"], gsw.SA_from_SP(mc.SP, mc.p, lat=lat, lon=lon).data)
+    mc["CT"] = (["time"], gsw.CT_from_t(mc.SA, mc.t, mc.p).data)
+    mc["sg0"] = (["time"], gsw.sigma0(mc.SA, mc.CT).data)
 
     # Add attributes for some of the variables.
     attributes = {
@@ -578,7 +578,7 @@ def read_xml_config(file):
     ci = 0
     for si in sa:
         keys = si.keys()
-        for k in keys:
+        for k in list(keys):
             if "@" not in k and k != "NotInUse":
                 if k == "TemperatureSensor":
                     ti += 1
