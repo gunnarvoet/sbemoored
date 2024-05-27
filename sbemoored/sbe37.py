@@ -2,12 +2,10 @@
 # -*- coding: utf-8 -*-
 """Module sbemoored.sbe37"""
 
-
 import os
 import pathlib
 import datetime
 import matplotlib.pyplot as plt
-import matplotlib as mpl
 import numpy as np
 import xarray as xr
 import pandas as pd
@@ -78,11 +76,7 @@ def proc(
     if data_out:
         savepath = data_out.joinpath(filename)
         if savepath.exists() and cut_end is None and cut_beg is None:
-            print(
-                "already processed\nreading netcdf file from\n{}".format(
-                    savepath
-                )
-            )
+            print("already processed\nreading netcdf file from\n{}".format(savepath))
             tds = xr.open_dataset(savepath)
             # Update time file stamp. This way, make still recognizes that
             # the file has been worked on.
@@ -97,9 +91,7 @@ def proc(
         tds = read_sbe_cnv(file, lat=lat, lon=lon)
         savenc = False
     # cut short (if necessary) apply time drift
-    tds = time_offset(
-        tds, insttime=time_instrument, utctime=time_utc, cuttime=cut_end
-    )
+    tds = time_offset(tds, insttime=time_instrument, utctime=time_utc, cuttime=cut_end)
     # cut at beginning
     if cut_beg is not None:
         mask = tds.time > cut_beg
@@ -107,19 +99,19 @@ def proc(
 
     # read xmlcon and set attributes
     cfgp = read_xml_config(file)
-    vars = dict(t='TemperatureSensor1', c='ConductivitySensor1', p='PressureSensor')
+    vars = dict(t="TemperatureSensor1", c="ConductivitySensor1", p="PressureSensor")
     for k, v in vars.items():
         tds[k].attrs["SN"] = cfgp[v].cal["SerialNumber"]
         tds[k].attrs["CalDate"] = cfgp[v].cal["CalibrationDate"]
 
     # add more attributes
-    if type(meta) is dict:
+    if isinstance(meta, dict):
         for k, v in meta.items():
             tds.attrs[k] = v
     if lon is not None:
-        tds.attrs['lon'] = lon
+        tds.attrs["lon"] = lon
     if lat is not None:
-        tds.attrs['lat'] = lat
+        tds.attrs["lat"] = lat
 
     # save to netcdf
     if savenc:
@@ -186,9 +178,7 @@ def read_sbe_cnv(file, lat=0, lon=0):
         "SA": dict(long_name="absolute salinity", units=r"kg/m$^3$"),
         "c": dict(long_name="conductivity", units="mS/cm"),
         "SP": dict(long_name="practical salinity", units=""),
-        "sg0": dict(
-            long_name=r"potential density $\sigma_0$", units=r"kg/m$^3$"
-        ),
+        "sg0": dict(long_name=r"potential density $\sigma_0$", units=r"kg/m$^3$"),
     }
     for k, att in attributes.items():
         if k in list(mc.variables.keys()):
@@ -246,7 +236,7 @@ def parse_cnv_with_time(cnv):
     base_year = pd.to_datetime(start_time_str).year
     mctime_ns = yday1_to_datetime64(base_year, mcyday)
     # convert to milliseconds, otherwise netcdf may run into trouble
-    mctime = gv.time.convert_units(mctime_ns, unit='ms')
+    mctime = gv.time.convert_units(mctime_ns, unit="ms")
     # let's make sure the first time stamp we generated matches the string in the cnv file
     try:
         assert pd.to_datetime(np.datetime64(mctime[0], "s")) == pd.to_datetime(
@@ -303,12 +293,8 @@ def parse_header(cnv):
     xi = entries["cnd_units"].find("[")
     entries["cnd_units"] = entries["cnd_units"][xi + 1 : xi + 4]
     if "[" in entries["start_time_str"]:
-        entries["start_time_str"] = (
-            entries["start_time_str"].split("[")[0].strip()
-        )
-    entries["start_time"] = pd.to_datetime(
-        entries["start_time_str"]
-    ).to_datetime64()
+        entries["start_time_str"] = entries["start_time_str"].split("[")[0].strip()
+    entries["start_time"] = pd.to_datetime(entries["start_time_str"]).to_datetime64()
 
     # serial number
     entries2 = dict(
@@ -361,7 +347,7 @@ def time_offset(tds, insttime, utctime, cuttime=None):
     elif insttime is None or utctime is None:
         print("no time readings provided; not applying any offset")
         tds.attrs["time offset applied"] = 0
-        tds.attrs["time drift in ms"] = 'N/A'
+        tds.attrs["time drift in ms"] = "N/A"
     else:
         # cut time series short if necessary
         if cuttime is not None:
@@ -376,15 +362,10 @@ def time_offset(tds, insttime, utctime, cuttime=None):
         else:
             scale_factor = 1
         # calculate time offset
-        offset = (
-            np.timedelta64(insttime - utctime, "ms").astype("int")
-            * scale_factor
-        )
+        offset = np.timedelta64(insttime - utctime, "ms").astype("int") * scale_factor
         tds.attrs["time drift in ms"] = offset
         # apply offset
-        print(
-            "applying time offset of {}ms".format(tds.attrs["time drift in ms"])
-        )
+        print("applying time offset of {}ms".format(tds.attrs["time drift in ms"]))
         # generate linear time drift vector
         old_time = tds.time.copy()
         time_offset_linspace = np.linspace(
@@ -393,8 +374,7 @@ def time_offset(tds, insttime, utctime, cuttime=None):
         # convert to numpy timedelta64
         # this format can't handle non-integers, so we switch to nanoseconds
         time_offset = [
-            np.timedelta64(int(np.round(ti * 1e6)), "ns")
-            for ti in time_offset_linspace
+            np.timedelta64(int(np.round(ti * 1e6)), "ns") for ti in time_offset_linspace
         ]
         new_time = old_time - time_offset
         tds["time"] = new_time
@@ -421,7 +401,7 @@ def plot(tds, figure_out=None, figure_name=None):
 
     tds.p.plot(ax=ax[0])
     # plot a warning if time offset not applied
-    if tds.attrs["time drift in ms"] == 'N/A':
+    if tds.attrs["time drift in ms"] == "N/A":
         ax[0].text(
             0.05,
             1.05,
@@ -566,9 +546,7 @@ def read_xml_config(file):
         with open(xmlfile) as fd:
             tmp = xmltodict.parse(fd.read())
     except OSError as e:
-        raise FileNotFoundError(
-            errno.ENOENT, os.strerror(errno.ENOENT), e.filename
-        )
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), e.filename)
     tmp = tmp["SBE_InstrumentConfiguration"]
     tmp = tmp["Instrument"]
     sa = tmp["SensorArray"]["Sensor"]
@@ -613,9 +591,7 @@ def _xml_coeffs_to_float(cfgp):
             elif isinstance(cfgp[k]["cal"][ki], list):
                 for i, li in enumerate(cfgp[k]["cal"][ki]):
                     for kli in li.keys():
-                        cfgp[k]["cal"][ki][i][kli] = float(
-                            cfgp[k]["cal"][ki][i][kli]
-                        )
+                        cfgp[k]["cal"][ki][i][kli] = float(cfgp[k]["cal"][ki][i][kli])
         # We can't have None values in the xarray.Dataset later on
         # or otherwise it won't properly write to netcdf. Therefore,
         # convert any None items to 'N/A'

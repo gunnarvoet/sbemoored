@@ -2,12 +2,8 @@
 # -*- coding: utf-8 -*-
 """Module sbemoored.sbe56"""
 
-
-import os
 import pathlib
-import datetime
 import matplotlib.pyplot as plt
-import matplotlib as mpl
 import numpy as np
 import xarray as xr
 import pandas as pd
@@ -56,11 +52,7 @@ def proc(
     if data_out:
         savepath = data_out.joinpath(filename)
         if savepath.exists():
-            print(
-                "already processed\nreading netcdf file from\n{}".format(
-                    savepath
-                )
-            )
+            print("already processed\nreading netcdf file from\n{}".format(savepath))
             tds = xr.open_dataarray(savepath)
             # Update time file stamp. This way, make still recognizes that
             # the file has been worked on.
@@ -180,9 +172,7 @@ def time_offset(tds, insttime, utctime, time_offset=None):
             offset = np.timedelta64(time_offset, "ms").astype("int")
         tds.attrs["time drift in ms"] = offset
         # apply offset
-        print(
-            "applying time offset of {}ms".format(tds.attrs["time drift in ms"])
-        )
+        print("applying time offset of {}ms".format(tds.attrs["time drift in ms"]))
         # generate linear time drift vector
         old_time = tds.time.copy()
         time_offset_linspace = np.linspace(
@@ -191,8 +181,7 @@ def time_offset(tds, insttime, utctime, time_offset=None):
         # convert to numpy timedelta64
         # this format can't handle non-integers, so we switch to nanoseconds
         time_offset_vec = [
-            np.timedelta64(int(np.round(ti * 1e6)), "ns")
-            for ti in time_offset_linspace
+            np.timedelta64(int(np.round(ti * 1e6)), "ns") for ti in time_offset_linspace
         ]
         new_time = old_time - time_offset_vec
         tds["time"] = new_time
@@ -223,6 +212,7 @@ def plot(solo, figure_out=None, cal_time=None):
         time or a tuple of two time stamps with pre- and post-deployment clock
         calibration.
     """
+
     # Generate a list of one or two time stamps and check format of time
     # stamp(s) provided.
     def time_ok(time):
@@ -331,7 +321,7 @@ def plot(solo, figure_out=None, cal_time=None):
     # Plot calibration.
     if show_cal:
         # determine time span of plot based on sampling period
-        sampling_period = solo.attrs['sampling period in s']
+        sampling_period = solo.attrs["sampling period in s"]
         width = int(sampling_period * 20)
         for cal_time, axi in zip(cal, axcal):
             tmp = solo.sel(
@@ -342,9 +332,7 @@ def plot(solo, figure_out=None, cal_time=None):
             )
             if len(tmp) > 0:
                 tmp.plot(ax=axi, marker=".")
-                ylims = np.array(
-                    [np.floor(tmp.min().data), np.ceil(tmp.max().data)]
-                )
+                ylims = np.array([np.floor(tmp.min().data), np.ceil(tmp.max().data)])
             else:
                 ylims = np.array([1, 9])
             axi.plot(
@@ -382,7 +370,6 @@ def plot(solo, figure_out=None, cal_time=None):
 
 
 def plot_old(solo, figure_out=None, cal_time=None):
-
     # check if cal_time is past end of time series
     if cal_time is not None:
         if solo.time[-1] < cal_time:
@@ -463,9 +450,7 @@ def plot_old(solo, figure_out=None, cal_time=None):
         )
         if len(tmp) > 0:
             tmp.plot(ax=ax1, marker=".")
-            ylims = np.array(
-                [np.floor(tmp.min().data), np.ceil(tmp.max().data)]
-            )
+            ylims = np.array([np.floor(tmp.min().data), np.ceil(tmp.max().data)])
         else:
             ylims = np.array([1, 9])
         ax1.plot(
