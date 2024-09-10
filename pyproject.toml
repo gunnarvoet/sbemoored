@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sbemoored"
+version = "2024.09"
+authors = [
+    {name = "Gunnar Voet", email = "gvoet@ucsd.edu"},
+    ]
+description = "Moored SBE data processing"
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["physical oceanography"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Oceanography",
+    ]
+requires-python = ">= 3.10"
+dependencies = [
+    "numpy",
+    "gsw",
+    "scipy",
+    "xarray",
+    "netcdf4",
+    "xmltodict",
+    "pandas",
+    ]
+
+[project.optional-dependencies]
+test = [
+  "pytest >=6.0",
+]
+
+[project.urls]
+# Homepage = "https://example.com"
+Documentation = "https://gunnarvoet.net/sbemoored/sbemoored.html"
+Repository = "https://github.com/gunnarvoet/sbemoored.git"
+Issues = "https://github.com/gunnarvoet/sbemoored/issues"
+# Changelog = "https://github.com/gunnarvoet/sbemoored/blob/main/HISTORY.md"
+
+[tool.pytest.ini_options]
+# in general, do not place a `__init__.py` in your tests
+# options are explained here:
+# https://learn.scientific-python.org/development/guides/pytest/
+minversion = "6.0"
+# addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
+addopts = []
+xfail_strict = true
+filterwarnings = ["error"]
+log_cli_level = "info"
+testpaths = ["tests", ]

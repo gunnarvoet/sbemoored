@@ -1,15 +1,14 @@
 sbemoored
 =========
 
-SBE moored instrument data processing. 
-
-* Free software: MIT license
+SBE moored instrument (SBE56 & SBE37) data processing.
 
 Features
 --------
+- Convert .cnv/.csv-files to netcdf format.
+- Apply clock-drift correction.
+- Calculate derived variables using [GSW-Python](https://teos-10.github.io/GSW-Python/)
 
-* SBE56 data processing including conversion to netcdf
-* SBE37 data processing including conversion to netcdf
 
 <!-- * Comparison against post-recovery clock calibration (warm water dip) -->
 

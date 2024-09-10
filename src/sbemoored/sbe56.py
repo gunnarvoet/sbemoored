@@ -4,11 +4,10 @@
 
 import pathlib
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import numpy as np
 import xarray as xr
 import pandas as pd
-
-import gvpy as gv
 
 
 def proc(
@@ -132,7 +131,7 @@ def read_csv(file):
     )
     t.attrs["units"] = "°C"
     t.attrs["long_name"] = "temperature"
-    t.attrs["SN"] = header["SN"]
+    t.attrs["SN"] = int(header["SN"])
     t.attrs["model"] = header["model"]
     t.attrs["firmware version"] = header["firmware version"]
     t.attrs["file"] = header["source file"]
@@ -316,7 +315,7 @@ def plot(solo, figure_out=None, cal_time=None):
     ax0.grid()
     ax0.set(title="SBE56 SN {}".format(solo.attrs["SN"]))
     ax0.set(xlabel="")
-    gv.plot.concise_date(ax0)
+    concise_date(ax0)
 
     # Plot calibration.
     if show_cal:
@@ -360,7 +359,7 @@ def plot(solo, figure_out=None, cal_time=None):
                 xlabel="",
             )
             axi.grid()
-            gv.plot.concise_date(axi)
+            concise_date(axi)
         if ncal == 2:
             axcal[-1].set(ylabel="")
 
@@ -438,7 +437,7 @@ def plot_old(solo, figure_out=None, cal_time=None):
     ax0.grid()
     ax0.set(title="SBE56 SN {}".format(solo.attrs["SN"]))
     ax0.set(xlabel="")
-    gv.plot.concise_date(ax0)
+    concise_date(ax0)
 
     # plot calibration
     if show_cal:
@@ -478,8 +477,43 @@ def plot_old(solo, figure_out=None, cal_time=None):
             xlabel="",
         )
         ax1.grid()
-        gv.plot.concise_date(ax1)
+        concise_date(ax1)
 
     if figure_out is not None or False:
         figurename = "{:s}.png".format(solo.attrs["file"][:-4])
         plt.savefig(figure_out.joinpath(figurename), facecolor="w", dpi=300)
+
+
+def concise_date(ax=None, minticks=3, maxticks=10, show_offset=True, **kwargs):
+    """
+    Better date ticks using matplotlib's ConciseDateFormatter.
+
+    Parameters
+    ----------
+    ax : axis handle
+        Handle to axis (optional).
+    minticks : int
+        Minimum number of ticks (optional, default 6).
+    maxticks : int
+        Maximum number of ticks (optional, default 10).
+    show_offset : bool, optional
+        Show offset string to the right (default True).
+
+    Note
+    ----
+    Currently only works for x-axis
+
+    See Also
+    --------
+    matplotlib.mdates.ConciseDateFormatter : For formatting options that
+      can be used here.
+    """
+    if ax is None:
+        ax = plt.gca()
+    locator = mdates.AutoDateLocator(minticks=minticks, maxticks=maxticks)
+    formatter = mdates.ConciseDateFormatter(locator, show_offset=show_offset, **kwargs)
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(formatter)
+    # remove axis label "time" if present
+    if ax.get_xlabel() == "time":
+        _ = ax.set_xlabel("")
