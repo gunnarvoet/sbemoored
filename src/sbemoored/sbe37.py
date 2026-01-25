@@ -5,6 +5,7 @@
 import os
 import pathlib
 import datetime
+import warnings
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
@@ -30,7 +31,7 @@ def proc(
     meta=None,
 ):
     """
-    Combining SBE56 processing steps.
+    Combining SBE37 processing steps.
 
     Parameters
     ----------
@@ -88,6 +89,14 @@ def proc(
         print("reading csv file")
         tds = read_sbe_cnv(file, lat=lat, lon=lon)
         savenc = False
+
+    # compare length of time series to number of values in header file
+    # print a warning if they don't match and change the meta data
+    # since otherwise we run into trouble later
+    if len(tds.time) != tds.nvalues:
+        warnings.warn("header nvalues did not match length of time series", UserWarning)
+        tds.attrs["nvalues"] = len(tds.time)
+
     # cut short (if necessary) apply time drift
     tds = time_offset(tds, insttime=time_instrument, utctime=time_utc, cuttime=cut_end)
     # cut at beginning
@@ -272,6 +281,21 @@ def plot(tds, figure_out=None, figure_name=None):
         if figure_name is None:
             figure_name = "{:s}.png".format(tds.attrs["file"][:-4])
         plt.savefig(figure_out.joinpath(figure_name), facecolor="w", dpi=300)
+
+
+def plot_clock_cal(tds, cal_time):
+    fig, ax = plt.subplots(
+        nrows=1, ncols=1, figsize=(7, 4), constrained_layout=True,
+    )
+    dt = np.timedelta64(10, "m")
+    tsel = tds.sel(time=slice(cal_time - dt, cal_time + dt)).t
+    tsel.plot(ax=ax, marker="o")
+    mint, maxt = tsel.min().data, tsel.max().data
+    ax.vlines(cal_time, mint, maxt, color="purple")
+    ax.grid()
+    ax.set(xlabel="")
+    ax.set(title="SBE37 SN {} clock calibration".format(tds.attrs["SN"]))
+    _concise_date(ax)
 
 
 def clock_check(tds, plot=True, timedelta=200):
