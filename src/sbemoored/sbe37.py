@@ -30,8 +30,11 @@ def proc(
     lon=None,
     meta=None,
 ):
-    """
-    Combining SBE37 processing steps.
+    """Combining SBE37 processing steps.
+
+    Calls `read_sbe_cnv` for regular `.cnv` files processed with Seaterm V2 and
+    the data conversion tool. Calls `read_sbe_asc` for `.asc` files processed
+    with Seaterm V1.
 
     Parameters
     ----------
@@ -70,7 +73,7 @@ def proc(
     """
     if type(file) != pathlib.PosixPath:
         file = pathlib.Path(file)
-    # only read raw file if we haven't written the netcdf file yet
+    # Only read raw file if we haven't written the netcdf file yet
     filename = "{:s}.nc".format(file.stem)
     if data_out:
         savepath = data_out.joinpath(filename)
@@ -80,19 +83,27 @@ def proc(
             # Update time file stamp. This way, make still recognizes that
             # the file has been worked on.
             savepath.touch()
+            need_to_read_raw = False
             savenc = False
         else:
-            print("reading csv file")
-            tds = read_sbe_cnv(file, lat=lat, lon=lon)
+            need_to_read_raw = True
             savenc = True
     else:
-        print("reading csv file")
-        tds = read_sbe_cnv(file, lat=lat, lon=lon)
+        # Read raw but don't save netcdf if no output fileneame provided
+        need_to_read_raw = True
         savenc = False
 
-    # compare length of time series to number of values in header file
-    # print a warning if they don't match and change the meta data
-    # since otherwise we run into trouble later
+    if need_to_read_raw:
+        if file.suffix == ".cnv":
+            print("reading cnv file")
+            tds = read_sbe_cnv(file, lat=lat, lon=lon)
+        elif file.suffix == ".asc":
+            print("reading asc file")
+            tds = read_sbe_asc(file, lat=lat, lon=lon)
+
+    # Compare length of time series to number of values in header file.
+    # Print a warning if they don't match and change the meta data since
+    # otherwise we will run into trouble later.
     if len(tds.time) != tds.nvalues:
         warnings.warn("header nvalues did not match length of time series", UserWarning)
         tds.attrs["nvalues"] = len(tds.time)
@@ -454,22 +465,77 @@ def read_header(file):
 
     Parameters
     ----------
-    file : str or pathlib.Path
+    file : pathlib.Path object
         .cnv file
     """
     header = []
     with open(file) as f:
-        for s in f:
-            if s.startswith("*END*"):
-                header.append(s)
+        for line in f:
+            if line.startswith("*END*"):
+                header.append(line)
                 break
             else:
-                header.append(s)
+                header.append(line)
+        # Some older files have a few lines beyond the header. let's try to catch these.
+        #
+        # Here is an example:
+        # *END*
+        # start time =  26 Oct 2025  07:43:13
+        # sample interval = 90 seconds
+        # start sample number = 1
+        # 23.2836, 0.00001,    3.102, 26 Oct 2025, 07:43:13
+        #
+        # We look for the first line that starts with a number
+        for line in f:
+            clean_line = line.strip()
+            if not clean_line:
+                continue  # skip empty lines
+            if clean_line[0].isdigit():
+                # This is your first line of data!
+                break
+            else:
+                header.append(line)
+
     return header
 
 
 def get_header_length(header):
     return len(header)
+
+
+def parse_header_asc(header):
+    """Parse header for older SBE37.
+
+    Parameters
+    ----------
+    header : list of str
+
+    Returns
+    -------
+
+    """
+    for h in header:
+        if h.startswith("start time"):
+            start_time_str = h.split(" = ")[1].strip()
+        elif h.startswith("* Temperature SN"):
+            sn = int(h.split(" = ")[1].strip())
+        elif h.startswith("* samplenumber"):
+            nvalues = int(h.split(" = ")[1].strip().split(",")[0].strip())
+        elif h.startswith("* sample interval"):
+            sample_interval_str = h.split(" = ")[1].strip()
+
+    # time
+    start_time = pd.to_datetime(start_time_str).to_datetime64()
+    base_year = pd.to_datetime(start_time_str).year
+
+    return dict(
+        sn=sn,
+        nvalues=nvalues,
+        start_time=start_time,
+        start_time_str=start_time_str,
+        base_year=base_year,
+        sample_interval=sample_interval_str,
+    )
 
 
 def parse_header(header):
@@ -540,10 +606,19 @@ def parse_variables(ds):
         if k.startswith("t") and "90" in k:
             ds = ds.rename({k: "t"})
             ds.t.attrs = dict(long_name="temperature", units="°C")
+        if k.startswith("temperature"):
+            ds = ds.rename({k: "t"})
+            ds.t.attrs = dict(long_name="temperature", units="°C")
         if k.startswith("c") and "S/" in k:
             ds = ds.rename({k: "c"})
             # convert from S/m to mS/cm as this is needed for gsw.SP_from_C
             if "S/m" in k:
+                ds["c"] = ds.c * 10
+            ds.c.attrs = dict(long_name="conductivity", units="mS/cm")
+        if k.startswith("conductivity"):
+            ds = ds.rename({k: "c"})
+            if ds.c.median() < 20 and ds.c.median() > 2:
+                # convert from S/m to mS/cm as this is needed for gsw.SP_from_C
                 ds["c"] = ds.c * 10
             ds.c.attrs = dict(long_name="conductivity", units="mS/cm")
         if k.startswith("sal"):
@@ -577,6 +652,52 @@ def gsw_calcs(ds, lat=None, lon=None):
         if k in list(ds.variables.keys()):
             ds[k].attrs = att
     return ds
+
+
+def read_sbe_asc(file, lat=None, lon=None):
+    """Read Seabird .asc file as output for some older SBE37 firmware versions.
+
+    Calculate derived variables and return as xarray.Dataset.
+
+    Parameters
+    ----------
+    file : str or pathlib.Path
+        Complete path to .cnv file
+    lat : float, optional
+        Latitude (used for gsw calculations).
+    lon : float, optional
+        Longitude (used for gsw calculations).
+
+    Returns
+    -------
+    mc : xarray.Dataset
+        Microcat data as Dataset with some metadata as attributes.
+    """
+    header = read_header(file)
+    n = get_header_length(header)
+    ph = parse_header_asc(header)
+    tmp = pd.read_csv(file, skiprows=n, names=["temperature", "conductivity", "pressure", "date", "time"], sep=r",", header=0)
+    time = pd.to_datetime(tmp["date"].astype(str) + " " + tmp["time"].astype(str))
+    tmp["time"] = time
+    tmp.set_index("time", inplace=True)
+    tmp = tmp.drop(columns="date")
+    tmp = tmp.to_xarray()
+
+    tmp = parse_variables(tmp)
+
+    tmp.attrs["base_year"] = ph["base_year"]
+    tmp.attrs["SN"] = ph["sn"]
+    tmp.attrs["nvalues"] = ph["nvalues"]
+    tmp.attrs["sample_interval"] = ph["sample_interval"]
+    start_time = np.datetime_as_string(ph["start_time"], unit="s").replace("T", " ")
+    tmp.attrs["start_time"] = start_time
+    tmp.attrs["file"] = file.name
+    # Time offset attribute
+    tmp.attrs["time offset applied"] = 0
+
+    tmp = gsw_calcs(tmp, lat=lat, lon=lon)
+
+    return tmp
 
 
 def read_sbe_cnv(file, lat=None, lon=None):
