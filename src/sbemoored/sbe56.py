@@ -80,6 +80,44 @@ def proc(
     return tds
 
 
+def _decode_sbe56_sn(sn_raw):
+    """Split a raw SBE56 device-header serial number into short and device forms.
+
+    SBE56 serial numbers are reported in the raw `.csv` header as
+    ``5_600_000 + unit_number`` (e.g. ``05600418`` for unit 418,
+    ``05606413`` for unit 6413). This helper returns the human-readable
+    short SN alongside the device-form integer so callers can join on
+    the short SN while keeping the device value for traceability.
+
+    Parameters
+    ----------
+    sn_raw : str
+        Serial-number substring as captured from the raw header, e.g.
+        ``"05600418"``.
+
+    Returns
+    -------
+    sn_short : int
+        Unit number, e.g. ``418``.
+    sn_device : int
+        Device-reported integer, e.g. ``5_600_418``.
+
+    Raises
+    ------
+    ValueError
+        If the derived short SN is outside the expected SBE56 range
+        ``(0, 10_000)``, indicating an unexpected header format.
+    """
+    sn_device = int(sn_raw)
+    sn_short = sn_device - 5_600_000
+    if not 0 < sn_short < 10_000:
+        raise ValueError(
+            f"Unexpected SBE56 device SN {sn_device}; "
+            f"derived short SN {sn_short} is out of range."
+        )
+    return sn_short, sn_device
+
+
 def read_csv_header(file):
     header = []
     out = dict()
@@ -129,9 +167,11 @@ def read_csv(file):
         .astype(int)
         / 1e9
     )
+    sn_short, sn_device = _decode_sbe56_sn(header["SN"])
     t.attrs["units"] = "°C"
     t.attrs["long_name"] = "temperature"
-    t.attrs["SN"] = int(header["SN"])
+    t.attrs["SN"] = sn_short
+    t.attrs["device_sn"] = sn_device
     t.attrs["model"] = header["model"]
     t.attrs["firmware version"] = header["firmware version"]
     t.attrs["file"] = header["source file"]

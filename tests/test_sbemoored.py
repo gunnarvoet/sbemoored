@@ -50,8 +50,28 @@ def test_parse_header(header):
 
 def test_read_testfile_sbe56(testfile_sbe56):
     ds = sbe.sbe56.read_csv(testfile_sbe56)
-    assert ds.SN == 5600422
+    assert ds.SN == 422
+    assert ds.attrs["device_sn"] == 5_600_422
     assert ds[-1] == 20.1797
+
+
+@pytest.mark.parametrize(
+    "sn_raw,sn_short,sn_device",
+    [
+        ("05600376", 376, 5_600_376),
+        ("05600422", 422, 5_600_422),
+        ("05600916", 916, 5_600_916),
+        ("05606413", 6413, 5_606_413),
+        ("05606449", 6449, 5_606_449),
+    ],
+)
+def test_decode_sbe56_sn(sn_raw, sn_short, sn_device):
+    assert sbe.sbe56._decode_sbe56_sn(sn_raw) == (sn_short, sn_device)
+
+
+def test_decode_sbe56_sn_out_of_range():
+    with pytest.raises(ValueError, match="out of range"):
+        sbe.sbe56._decode_sbe56_sn("00000123")  # 123 - 5_600_000 < 0
 
 
 def test_read_testfile_sbe37(testfile_sbe37):
